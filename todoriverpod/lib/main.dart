@@ -1,19 +1,37 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:flutter_riverpod/flutter_riverpod.dart' show WidgetRef;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 void main() {
   runApp(MyApp());
 }
 
+final todoProvider =
+    StateNotifierProvider<TodoNotifier, AsyncValue<List<Todo>>>((ref) {
+  return TodoNotifier(ref.read);
+});
+
+class MyApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Todo App',
+      home: ProviderScope(
+        child: TodoScreen(),
+      ),
+    );
+  }
+}
+
 class Todo {
+  final int userId;
   final int id;
   final String title;
   final bool completed;
 
   Todo({
+    required this.userId,
     required this.id,
     required this.title,
     required this.completed,
@@ -21,6 +39,7 @@ class Todo {
 
   factory Todo.fromJson(Map<String, dynamic> json) {
     return Todo(
+      userId: json['userId'],
       id: json['id'],
       title: json['title'],
       completed: json['completed'],
@@ -28,65 +47,123 @@ class Todo {
   }
 }
 
-final todoProvider = StateNotifierProvider<TodoProvider, List<Todo>>((ref) {
-  return TodoProvider();
-});
+class TodoNotifier extends StateNotifier<AsyncValue<List<Todo>>> {
+  final Reader _read;
 
-class TodoProvider extends StateNotifier<List<Todo>> {
-  TodoProvider() : super([]);
+  TodoNotifier(this._read) : super(const AsyncLoading()) {
+    fetchTodos();
+  }
 
   Future<void> fetchTodos() async {
-    final response =
-        await http.get(Uri.parse('https://jsonplaceholder.typicode.com/todos'));
-
-    if (response.statusCode == 200) {
-      final List<dynamic> data = jsonDecode(response.body);
-      state = data.map((json) => Todo.fromJson(json)).toList();
-    } else {
-      throw Exception('Failed to fetch todos');
+    try {
+      final response = await http
+          .get(Uri.parse('https://jsonplaceholder.typicode.com/todos'));
+      if (response.statusCode == 200) {
+        List jsonResponse = json.decode(response.body);
+        state =
+            AsyncData(jsonResponse.map((item) => Todo.fromJson(item)).toList());
+      } else {
+        throw Exception('Failed to load todos');
+      }
+    } catch (e, stackTrace) {
+      state = AsyncError('Failed to fetch todos');
     }
   }
 }
 
-class MyApp extends StatelessWidget {
+class TodoScreen extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final todosAsync = ref.watch(todoProvider);
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Todos'),
+      ),
+      body: todosAsync.when(
+        loading: () => Center(
+          child: CircularProgressIndicator(),
+        ),
+        error: (error, stackTrace) => Center(
+          child: Text('Error: $error'),
+        ),
+        data: (todos) => TodoList(todos: todos),
+      ),
+    );
+  }
+}
+
+class TodoList extends StatelessWidget {
+  final List<Todo> todos;
+
+  TodoList({required this.todos});
+
   @override
   Widget build(BuildContext context) {
-    return ProviderScope(
-      child: MaterialApp(
-        title: 'Todos App',
-        home: Scaffold(
-          appBar: AppBar(
-            title: Text('Todos'),
-            backgroundColor: Colors.purple[50],
-          ),
-          body: Consumer(
-            builder: (context, watch, _) {
-              final List<Todo> todoProviderState = watch(todoProvider);
-                    return ListView.builder(
-                      itemCount: todoProviderState.length,
-                      itemBuilder: (context, index) {
-                        final Todo todo = todoProviderState[index];
-                        return Container(
-                          margin: EdgeInsets.only(bottom: 5.0),
-                          padding: EdgeInsets.all(10.0),
-                          decoration: BoxDecoration(
-                            color: Colors.grey[200],
-                            border: Border.all(
-                              color: Colors.grey[400]!,
-                              width: 1.0,
-                            ),
-                            borderRadius: BorderRadius.circular(5.0),
-                          ),
-                          child: ListTile(
-                            title: Text(todo.title),
-                            subtitle: Text('Completed: ${todo.completed}'),
-                          ),
-                        );
-                      },
-                    );
-                  
-            },
-          ),
+    return ListView.builder(
+      itemCount: todos.length,
+      itemBuilder: (context, index) {
+        return ListTile(
+          title: Text(todos[index].title),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => TodoDetailScreen(todo: todos[index]),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class TodoDetailScreen extends StatelessWidget {
+  final Todo todo;
+
+  TodoDetailScreen({required this.todo});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(todo.title),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "UserID: ${todo.userId}",
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            SizedBox(height: 8),
+            Text(
+              "ID: ${todo.id}",
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            SizedBox(height: 8),
+            Text(
+              'Title:',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            Text(todo.title),
+            SizedBox(height: 8),
+            Text(
+              'Completed:',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            Text(todo.completed ? 'Yes' : 'No'),
+          ],
         ),
       ),
     );
